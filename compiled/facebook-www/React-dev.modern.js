@@ -41,7 +41,7 @@ __DEV__ &&
         _key++
       )
         args[_key - 1] = arguments[_key];
-      printWarning("warn", format, args, Error("react-stack-top-frame"));
+      printWarning("warn", format, args);
     }
     function error$jscomp$0(format) {
       for (
@@ -52,15 +52,15 @@ __DEV__ &&
         _key2++
       )
         args[_key2 - 1] = arguments[_key2];
-      printWarning("error", format, args, Error("react-stack-top-frame"));
+      printWarning("error", format, args);
     }
-    function printWarning(level, format, args, currentStack) {
+    function printWarning(level, format, args) {
       level =
         require("react").__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       null != level &&
         level.getCurrentStack &&
-        ((currentStack = level.getCurrentStack(currentStack)),
-        "" !== currentStack && ((format += "%s"), args.push(currentStack)));
+        ((level = level.getCurrentStack()),
+        "" !== level && ((format += "%s"), args.push(level)));
       args.unshift(format);
       args.unshift(!1);
       warningWWW.apply(null, args);
@@ -268,8 +268,14 @@ __DEV__ &&
         } catch (x) {
           var match = x.stack.trim().match(/\n( *(at )?)/);
           prefix = (match && match[1]) || "";
+          suffix =
+            -1 < x.stack.indexOf("\n    at")
+              ? " (<anonymous>)"
+              : -1 < x.stack.indexOf("@")
+                ? "@unknown:0:0"
+                : "";
         }
-      return "\n" + prefix + name;
+      return "\n" + prefix + name + suffix;
     }
     function describeNativeComponentFrame(fn, construct) {
       if (!fn || reentry) return "";
@@ -544,7 +550,8 @@ __DEV__ &&
     }
     function warnIfStringRefCannotBeAutoConverted(config, self) {
       var owner;
-      "string" === typeof config.ref &&
+      !disableStringRefs &&
+        "string" === typeof config.ref &&
         (owner = getOwner()) &&
         self &&
         owner.stateNode !== self &&
@@ -651,13 +658,15 @@ __DEV__ &&
         null === type
           ? (isStaticChildren = "null")
           : isArrayImpl(type)
-          ? (isStaticChildren = "array")
-          : void 0 !== type && type.$$typeof === REACT_ELEMENT_TYPE
-          ? ((isStaticChildren =
-              "<" + (getComponentNameFromType(type.type) || "Unknown") + " />"),
-            (children =
-              " Did you accidentally export a JSX literal instead of a component?"))
-          : (isStaticChildren = typeof type);
+            ? (isStaticChildren = "array")
+            : void 0 !== type && type.$$typeof === REACT_ELEMENT_TYPE
+              ? ((isStaticChildren =
+                  "<" +
+                  (getComponentNameFromType(type.type) || "Unknown") +
+                  " />"),
+                (children =
+                  " Did you accidentally export a JSX literal instead of a component?"))
+              : (isStaticChildren = typeof type);
         error$jscomp$0(
           "React.jsx: type is invalid -- expected a string (for built-in components) or a class/function (for composite components) but got: %s.%s",
           isStaticChildren,
@@ -690,22 +699,23 @@ __DEV__ &&
         (checkKeyStringCoercion(maybeKey), (children = "" + maybeKey));
       hasValidKey(config) &&
         (checkKeyStringCoercion(config.key), (children = "" + config.key));
-      hasValidRef(config) && warnIfStringRefCannotBeAutoConverted(config, self);
+      hasValidRef(config) &&
+        (disableStringRefs ||
+          warnIfStringRefCannotBeAutoConverted(config, self));
       if (
-        (!enableFastJSXWithoutStringRefs &&
-          (!enableFastJSXWithStringRefs || "ref" in config)) ||
+        (!enableFastJSXWithoutStringRefs && "ref" in config) ||
         "key" in config
       ) {
         maybeKey = {};
         for (var propName in config)
           "key" !== propName &&
-            ("ref" === propName
-              ? (maybeKey.ref = coerceStringRef(
+            (disableStringRefs || "ref" !== propName
+              ? (maybeKey[propName] = config[propName])
+              : (maybeKey.ref = coerceStringRef(
                   config[propName],
                   getOwner(),
                   type
-                ))
-              : (maybeKey[propName] = config[propName]));
+                )));
       } else maybeKey = config;
       if (!disableDefaultPropsExceptForClasses && type && type.defaultProps) {
         config = type.defaultProps;
@@ -819,6 +829,7 @@ __DEV__ &&
       return info;
     }
     function coerceStringRef(mixedRef, owner, type) {
+      if (disableStringRefs) return mixedRef;
       if ("string" !== typeof mixedRef)
         if ("number" === typeof mixedRef || "boolean" === typeof mixedRef)
           willCoercionThrow(mixedRef) &&
@@ -837,37 +848,41 @@ __DEV__ &&
       return callback;
     }
     function stringRefAsCallbackRef(stringRef, type, owner, value) {
-      if (!owner)
-        throw Error(
-          "Element ref was specified as a string (" +
-            stringRef +
-            ") but no owner was set. This could happen for one of the following reasons:\n1. You may be adding a ref to a function component\n2. You may be adding a ref to a component that was not created inside a component's render method\n3. You have multiple copies of React loaded\nSee https://react.dev/link/refs-must-have-owner for more information."
-        );
-      if (1 !== owner.tag)
-        throw Error(
-          "Function components cannot have string refs. We recommend using useRef() instead. Learn more about using refs safely here: https://react.dev/link/strict-mode-string-ref"
-        );
-      if (
-        "function" !== typeof type ||
-        (type.prototype && type.prototype.isReactComponent)
-      )
-        (type = getComponentNameFromFiber(owner) || "Component"),
-          didWarnAboutStringRefs[type] ||
-            (error$jscomp$0(
-              'Component "%s" contains the string ref "%s". Support for string refs will be removed in a future major release. We recommend using useRef() or createRef() instead. Learn more about using refs safely here: https://react.dev/link/strict-mode-string-ref',
-              type,
-              stringRef
-            ),
-            (didWarnAboutStringRefs[type] = !0));
-      owner = owner.stateNode;
-      if (!owner)
-        throw Error(
-          "Missing owner for string ref " +
-            stringRef +
-            ". This error is likely caused by a bug in React. Please file an issue."
-        );
-      owner = owner.refs;
-      null === value ? delete owner[stringRef] : (owner[stringRef] = value);
+      if (!disableStringRefs) {
+        if (!owner)
+          throw Error(
+            "Element ref was specified as a string (" +
+              stringRef +
+              ") but no owner was set. This could happen for one of the following reasons:\n1. You may be adding a ref to a function component\n2. You may be adding a ref to a component that was not created inside a component's render method\n3. You have multiple copies of React loaded\nSee https://react.dev/link/refs-must-have-owner for more information."
+          );
+        if (1 !== owner.tag)
+          throw Error(
+            "Function components cannot have string refs. We recommend using useRef() instead. Learn more about using refs safely here: https://react.dev/link/strict-mode-string-ref"
+          );
+        if (
+          "function" !== typeof type ||
+          (type.prototype && type.prototype.isReactComponent)
+        )
+          (type = getComponentNameFromFiber(owner) || "Component"),
+            didWarnAboutStringRefs[type] ||
+              (enableLogStringRefsProd &&
+                enableLogStringRefsProd(type, stringRef),
+              error$jscomp$0(
+                'Component "%s" contains the string ref "%s". Support for string refs will be removed in a future major release. We recommend using useRef() or createRef() instead. Learn more about using refs safely here: https://react.dev/link/strict-mode-string-ref',
+                type,
+                stringRef
+              ),
+              (didWarnAboutStringRefs[type] = !0));
+        owner = owner.stateNode;
+        if (!owner)
+          throw Error(
+            "Missing owner for string ref " +
+              stringRef +
+              ". This error is likely caused by a bug in React. Please file an issue."
+          );
+        owner = owner.refs;
+        null === value ? delete owner[stringRef] : (owner[stringRef] = value);
+      }
     }
     function escape(key) {
       var escaperLookup = { "=": "=0", ":": "=2" };
@@ -1190,12 +1205,13 @@ __DEV__ &&
         typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart &&
       __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStart(Error());
     var dynamicFeatureFlags = require("ReactFeatureFlags"),
-      enableDebugTracing = dynamicFeatureFlags.enableDebugTracing,
-      enableTransitionTracing = dynamicFeatureFlags.enableTransitionTracing,
-      enableRenderableContext = dynamicFeatureFlags.enableRenderableContext,
       disableDefaultPropsExceptForClasses =
         dynamicFeatureFlags.disableDefaultPropsExceptForClasses,
-      enableFastJSX = dynamicFeatureFlags.enableFastJSX,
+      disableStringRefs = dynamicFeatureFlags.disableStringRefs,
+      enableDebugTracing = dynamicFeatureFlags.enableDebugTracing,
+      enableLogStringRefsProd = dynamicFeatureFlags.enableLogStringRefsProd,
+      enableRenderableContext = dynamicFeatureFlags.enableRenderableContext,
+      enableTransitionTracing = dynamicFeatureFlags.enableTransitionTracing,
       renameElementSymbol = dynamicFeatureFlags.renameElementSymbol,
       REACT_LEGACY_ELEMENT_TYPE = Symbol.for("react.element"),
       REACT_ELEMENT_TYPE = renameElementSymbol
@@ -1299,6 +1315,7 @@ __DEV__ &&
       prevGroupEnd;
     disabledLog.__reactDisabledLog = !0;
     var prefix,
+      suffix,
       reentry = !1;
     var componentFrameCache = new (
       "function" === typeof WeakMap ? WeakMap : Map
@@ -1308,8 +1325,7 @@ __DEV__ &&
       didWarnAboutOldJSXRuntime;
     var didWarnAboutStringRefs = {};
     var didWarnAboutElementRef = {};
-    var enableFastJSXWithStringRefs = enableFastJSX && !0,
-      enableFastJSXWithoutStringRefs = enableFastJSXWithStringRefs && !1,
+    var enableFastJSXWithoutStringRefs = disableStringRefs,
       didWarnAboutKeySpread = {},
       ownerHasKeyUseWarning = {},
       didWarnAboutMaps = !1,
@@ -1355,7 +1371,8 @@ __DEV__ &&
                 return queueMicrotask(callback);
               });
             }
-          : enqueueTask;
+          : enqueueTask,
+      ReactCompilerRuntime = { c: useMemoCache };
     exports.Children = {
       map: mapChildren,
       forEach: function (children, forEachFunc, forEachContext) {
@@ -1397,6 +1414,7 @@ __DEV__ &&
     exports.Suspense = REACT_SUSPENSE_TYPE;
     exports.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE =
       ReactSharedInternals;
+    exports.__COMPILER_RUNTIME = ReactCompilerRuntime;
     exports.act = function (callback) {
       var prevActQueue = ReactSharedInternals.actQueue,
         prevActScopeDepth = actScopeDepth;
@@ -1543,13 +1561,13 @@ __DEV__ &&
             (disableDefaultPropsExceptForClasses ||
             void 0 !== config[propName] ||
             void 0 === defaultProps
-              ? "ref" === propName
-                ? (props.ref = coerceStringRef(
+              ? disableStringRefs || "ref" !== propName
+                ? (props[propName] = config[propName])
+                : (props.ref = coerceStringRef(
                     config[propName],
                     owner,
                     element.type
                   ))
-                : (props[propName] = config[propName])
               : (props[propName] = defaultProps[propName]));
       }
       var propName = arguments.length - 2;
@@ -1661,13 +1679,13 @@ __DEV__ &&
           isArrayImpl(type)
             ? (typeString = "array")
             : void 0 !== type && type.$$typeof === REACT_ELEMENT_TYPE
-            ? ((typeString =
-                "<" +
-                (getComponentNameFromType(type.type) || "Unknown") +
-                " />"),
-              (i =
-                " Did you accidentally export a JSX literal instead of a component?"))
-            : (typeString = typeof type);
+              ? ((typeString =
+                  "<" +
+                  (getComponentNameFromType(type.type) || "Unknown") +
+                  " />"),
+                (i =
+                  " Did you accidentally export a JSX literal instead of a component?"))
+              : (typeString = typeof type);
         error$jscomp$0(
           "React.createElement: type is invalid -- expected a string (for built-in components) or a class/function (for composite components) but got: %s.%s",
           typeString,
@@ -1685,7 +1703,8 @@ __DEV__ &&
             "Your app (or one of its dependencies) is using an outdated JSX transform. Update to the modern JSX transform for faster performance: https://react.dev/link/new-jsx-transform"
           )),
         hasValidRef(config) &&
-          warnIfStringRefCannotBeAutoConverted(config, config.__self),
+          (disableStringRefs ||
+            warnIfStringRefCannotBeAutoConverted(config, config.__self)),
         hasValidKey(config) &&
           (checkKeyStringCoercion(config.key), (typeString = "" + config.key)),
         config))
@@ -1693,9 +1712,9 @@ __DEV__ &&
             "key" !== propName &&
             "__self" !== propName &&
             "__source" !== propName &&
-            ("ref" === propName
-              ? (i.ref = coerceStringRef(config[propName], getOwner(), type))
-              : (i[propName] = config[propName]));
+            (disableStringRefs || "ref" !== propName
+              ? (i[propName] = config[propName])
+              : (i.ref = coerceStringRef(config[propName], getOwner(), type)));
       var childrenLength = arguments.length - 2;
       if (1 === childrenLength) i.children = children;
       else if (1 < childrenLength) {
@@ -1742,18 +1761,18 @@ __DEV__ &&
             "forwardRef requires a render function but received a `memo` component. Instead of forwardRef(memo(...)), use memo(forwardRef(...))."
           )
         : "function" !== typeof render
-        ? error$jscomp$0(
-            "forwardRef requires a render function but was given %s.",
-            null === render ? "null" : typeof render
-          )
-        : 0 !== render.length &&
-          2 !== render.length &&
-          error$jscomp$0(
-            "forwardRef render functions accept exactly two parameters: props and ref. %s",
-            1 === render.length
-              ? "Did you forget to use the ref parameter?"
-              : "Any additional parameter will be undefined."
-          );
+          ? error$jscomp$0(
+              "forwardRef requires a render function but was given %s.",
+              null === render ? "null" : typeof render
+            )
+          : 0 !== render.length &&
+            2 !== render.length &&
+            error$jscomp$0(
+              "forwardRef render functions accept exactly two parameters: props and ref. %s",
+              1 === render.length
+                ? "Did you forget to use the ref parameter?"
+                : "Any additional parameter will be undefined."
+            );
       null != render &&
         null != render.defaultProps &&
         error$jscomp$0(
@@ -1852,20 +1871,19 @@ __DEV__ &&
     };
     exports.startTransition = function (scope, options) {
       var prevTransition = ReactSharedInternals.T,
-        transition = {};
-      ReactSharedInternals.T = transition;
-      var currentTransition = ReactSharedInternals.T;
-      ReactSharedInternals.T._updatedFibers = new Set();
+        currentTransition = {};
+      ReactSharedInternals.T = currentTransition;
+      currentTransition._updatedFibers = new Set();
       enableTransitionTracing &&
         void 0 !== options &&
         void 0 !== options.name &&
-        ((ReactSharedInternals.T.name = options.name),
-        (ReactSharedInternals.T.startTime = -1));
+        ((currentTransition.name = options.name),
+        (currentTransition.startTime = -1));
       try {
         var returnValue = scope(),
           onStartTransitionFinish = ReactSharedInternals.S;
         null !== onStartTransitionFinish &&
-          onStartTransitionFinish(transition, returnValue);
+          onStartTransitionFinish(currentTransition, returnValue);
         "object" === typeof returnValue &&
           null !== returnValue &&
           "function" === typeof returnValue.then &&
@@ -1898,6 +1916,14 @@ __DEV__ &&
     };
     exports.unstable_useCacheRefresh = function () {
       return resolveDispatcher().useCacheRefresh();
+    };
+    exports.unstable_useContextWithBailout = function (context, select) {
+      var dispatcher = resolveDispatcher();
+      context.$$typeof === REACT_CONSUMER_TYPE &&
+        error$jscomp$0(
+          "Calling useContext(Context.Consumer) is not supported and will cause bugs. Did you mean to call useContext(Context) instead?"
+        );
+      return dispatcher.unstable_useContextWithBailout(context, select);
     };
     exports.unstable_useMemoCache = useMemoCache;
     exports.use = function (usable) {
@@ -1971,7 +1997,7 @@ __DEV__ &&
     exports.useTransition = function () {
       return resolveDispatcher().useTransition();
     };
-    exports.version = "19.0.0-www-modern-e02baf6c92-20240627";
+    exports.version = "19.0.0-www-modern-13411e45-20241014";
     "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ &&
       "function" ===
         typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop &&
